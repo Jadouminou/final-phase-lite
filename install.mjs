@@ -22,9 +22,10 @@ if (process.argv.includes("--remove")) {
   process.exit(0);
 }
 
-function version(cmd, args = ["--version"]) {
+function version(cmd, args = ["--version"], all = false) {
   try {
-    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], shell: WIN }).trim().split(/\r?\n/)[0];
+    const out = execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], shell: WIN }).trim();
+    return all ? out : out.split(/\r?\n/)[0];
   } catch {
     return null;
   }
@@ -49,12 +50,14 @@ checks.push({
 });
 if (!claude && opencode) checks[1].optional = true;
 
-const ollamaBin = version("ollama");
+// When the Ollama app isn't open, `ollama --version` says so before the version.
+const ollamaOut = version("ollama", ["--version"], true);
+const ollamaVersion = ollamaOut?.match(/version is\s*(\S+)/i)?.[1] ?? ollamaOut?.split(/\r?\n/).find((l) => !/^warning/i.test(l));
 checks.push({
   name: "Ollama",
-  ok: !!ollamaBin,
+  ok: !!ollamaOut,
   optional: true,
-  found: ollamaBin?.replace(/^.*?version is\s*/i, ""),
+  found: ollamaOut ? `${ollamaVersion ?? "installed"}${/could not connect/i.test(ollamaOut) ? ", not running: open the Ollama app before you use it" : ""}` : null,
   why: "runs models on this computer, free and private (used through OpenCode). Set its Context length to 32k or more",
   fix: "https://ollama.com/download, then: ollama pull qwen3.5:9b",
 });
