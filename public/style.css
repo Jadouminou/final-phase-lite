@@ -377,3 +377,16 @@ textarea:focus { border-color: rgba(255, 255, 255, 0.3); }
 .mark-tools:empty { display: none; }
 .mark-tools .dotm { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #ff5a36; }
 .mark-tools .link { font-size: 12px; }
+
+/* Collecting notes: drafts wait until Apply, then go together in one turn. */
+.pin.draft { background: #f97316; }
+.msg.me.draft { border-style: dashed; border-color: rgba(249, 115, 22, 0.55); }
+.msg.me .state .num { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #f97316; color: #111; font: 600 10px/1 var(--mono); }
+.apply-bar { display: none; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.apply-bar.show { display: flex; }
+.apply-bar .spacer { flex: 1; }
+.apply-bar b { color: var(--text); }
+.apply-bar .btn[disabled] { opacity: 0.4; cursor: default; }
+.ai-row .collect { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; cursor: pointer; }
+.ai-row .collect input { margin: 0; accent-color: #f97316; }
+.msg.me .state .link { white-space: nowrap; }

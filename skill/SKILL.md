@@ -22,6 +22,10 @@ for that folder, it just shows that window again. Tell the user the address in c
   user paused on and gives a picture of that frame. When they circled something, the note gives the circle's box, the
   composition elements inside it, and the picture has the circle drawn on it: "this" means what's in the circle. Open
   the picture before changing anything, and change only what the note asks.
+- One message often holds many notes (the user collects them, then presses Apply). Do them all in one pass: group the
+  edits by file, read each file once, rebuild or check once at the end, then reply with one short line per note.
+- If the project's HTML is generated from a source (the note says so, or the skill that made it does), change the
+  source and rebuild; never hand-edit generated files.
 - The window plays the HyperFrames composition straight from its files and reloads by itself whenever you save. Don't
   render the whole video to check a change. Render only when the user asks (the window has a Render button that asks
   you).

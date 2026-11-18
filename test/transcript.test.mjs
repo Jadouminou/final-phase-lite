@@ -175,3 +175,20 @@ test("the circled element is found in the code: what makes it, styles it and mov
   const msg = buildMessage([{ text: "make this red", time: 2, source: "live", entry: "index.html", region: { x: 0, y: 0, w: 10, h: 10, fw: 1920, fh: 1080 }, code: found }]);
   assert.match(msg, /Where that is in the code \(start there\):\n- index\.html:\d+/);
 });
+
+test("collected notes go as one message that asks for one pass, and follow how the project is made", () => {
+  const notes = [
+    { text: "bigger", time: 1, source: "live", entry: "index.html", region: { x: 0, y: 0, w: 10, h: 10, fw: 1920, fh: 1080 }, code: [{ file: "compositions/s1.html", line: 3, text: "x" }] },
+    { text: "a whoosh", time: 4, source: "live", entry: "index.html" },
+  ];
+  const plain = buildMessage(notes);
+  assert.match(plain, /left 2 notes\. Make all of them in this one turn/);
+  assert.match(plain, /one short line per note/);
+  assert.match(plain, /compositions\/s1\.html:3/);
+  assert.match(plain, /change the source and rebuild/);
+  const made = buildMessage(notes, { hints: { skill: "my-skill", generator: "build.mjs from plan.json" } });
+  assert.match(made, /made with the my-skill skill/);
+  assert.match(made, /generated \(by build\.mjs from plan\.json\)/);
+  assert.doesNotMatch(made, /compositions\/s1\.html:3/);
+  assert.doesNotMatch(buildMessage([notes[1]]), /this one turn/);
+});
