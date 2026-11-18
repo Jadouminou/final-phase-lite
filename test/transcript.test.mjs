@@ -192,3 +192,9 @@ test("collected notes go as one message that asks for one pass, and follow how t
   assert.doesNotMatch(made, /compositions\/s1\.html:3/);
   assert.doesNotMatch(buildMessage([notes[1]]), /this one turn/);
 });
+
+test("pictures sent with the message are said to be attached", () => {
+  const n = { text: "bigger", time: 1, source: "live", entry: "index.html", picture: ".final-phase-lite/frames/n1.jpg" };
+  assert.match(buildMessage([n], { attached: true }), /is attached to this message \(saved as \.final-phase-lite\/frames\/n1\.jpg; no need to open it again\)/);
+  assert.match(buildMessage([n]), /frames\/n1\.jpg \(look at it before changing anything\)/);
+});

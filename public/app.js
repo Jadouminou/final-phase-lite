@@ -819,7 +819,7 @@ function renderChat() {
   const items = [];
   for (const n of S.notes) {
     const mine = sid ? n.sessionId === sid || !n.sessionId : !n.sessionId;
-    if (mine || n.status === "queued" || n.status === "preparing" || n.status === "draft") items.push({ ts: n.createdAt, note: n });
+    if (mine || ["queued", "preparing", "draft", "failed"].includes(n.status)) items.push({ ts: n.createdAt, note: n });
   }
   for (const e of S.session.events ?? []) {
     if (e.kind === "text") items.push({ ts: e.ts ?? 0, text: e.text });
@@ -844,7 +844,7 @@ function renderChat() {
         ? `<span class="cost">· ${fmtTokens(u.tokens)} tokens${u.cost != null ? ` · ${fmtCost(u.cost)}${u.apiPrice ? " at API prices" : ""}` : ""}${u.notes > 1 ? ` for ${u.notes} notes` : ""}</span>`
         : "";
       const icon = n.status === "done" ? ICON.check : n.status === "failed" ? ICON.x : n.status === "sent" ? `<span class="spin"></span>` : n.status === "draft" ? `<span class="num">${draftNumber(n)}</span>` : ICON.wait;
-      const edit = n.status === "draft" ? ` <button class="link" data-edit="${n.id}">Edit</button>` : "";
+      const edit = n.status === "draft" ? ` <button class="link" data-edit="${n.id}">Edit</button>` : n.status === "failed" ? ` <button class="link" data-retry="${n.id}">Retry</button>` : "";
       const cancel = n.status === "queued" || n.status === "failed" || n.status === "draft" ? `${edit} <button class="link" data-cancel="${n.id}">Remove</button>` : "";
       const now = n.status === "queued" && S.waiting && !S.run.active ? ` <button class="link" data-sendnow="1">Send now</button>` : "";
       return `<div class="msg me ${n.status === "failed" ? "failed" : ""} ${n.status === "draft" ? "draft" : ""}" data-msg="${n.id}">${where}${pic}<div>${esc(n.text)}</div><div class="state"><span class="ic" style="width:13px;height:13px;display:inline-grid">${icon.replace("<svg", '<svg width="13" height="13"')}</span>${state}${cost}${cancel}${now}</div></div>`;
@@ -870,6 +870,7 @@ function renderChat() {
     }),
   );
   box.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", () => api("/api/cancel", { id: b.dataset.cancel })));
+  box.querySelectorAll("[data-retry]").forEach((b) => b.addEventListener("click", () => api("/api/retry", { id: b.dataset.retry })));
   box.querySelectorAll("[data-edit]").forEach((b) =>
     b.addEventListener("click", () => {
       const n = S.notes.find((x) => x.id === b.dataset.edit);

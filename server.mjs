@@ -268,7 +268,10 @@ async function maybeSend() {
   const fork = !!resumeId && !own.has(resumeId);
   const model = agent === "opencode" ? settings.model || follow.model : null;
   const entry = ready.find((n) => n.entry && project.entries.includes(n.entry))?.entry ?? project.entries[0];
-  const prompt = buildMessage(ready, { hints: entry ? project.hints[entry] : null });
+  const sees = agent === "opencode" && !!models.find((m) => m.id === model)?.image;
+  // Absolute: OpenCode reads a relative path from its own folder, not the project.
+  const files = sees ? ready.map((n) => n.picture && path.join(ROOT, ...n.picture.split("/"))).filter(Boolean) : [];
+  const prompt = buildMessage(ready, { hints: entry ? project.hints[entry] : null, attached: files.length > 0 });
   for (const n of ready) Object.assign(n, { status: "sent", sentAt: Date.now(), error: undefined, agent, model: model ?? undefined });
   const opts = {
     bin,
@@ -280,6 +283,7 @@ async function maybeSend() {
       if (!run.active) return;
       run.active.sessionId = id;
       for (const n of ready) n.sessionId = id;
+      notesChanged();
       if (id !== follow.id) void followSession({ agent, id, model }, false);
       else broadcast("run", runPayload());
     },
@@ -289,7 +293,7 @@ async function maybeSend() {
     },
   };
   const lean = agent === "opencode" && !!models.find((m) => m.id === model)?.local;
-  const r = agent === "opencode" ? oc.run({ ...opts, model, lean, extraEnv: ocEnv, title: ready[0].text.replace(/\s+/g, " ").slice(0, 60) }) : claude.run(opts);
+  const r = agent === "opencode" ? oc.run({ ...opts, model, lean, extraEnv: ocEnv, files, title: ready[0].text.replace(/\s+/g, " ").slice(0, 60) }) : claude.run(opts);
   run.active = { agent, stop: r.stop, sessionId: resumeId, startedAt: Date.now(), noteIds: ready.map((n) => n.id) };
   run.last = null;
   broadcast("run", runPayload());
@@ -490,6 +494,16 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
   if (p === "/api/apply") return send(res, 200, { applied: applyDrafts() });
+  if (p === "/api/retry") {
+    // A note that didn't go through goes back in: as a draft when collecting (Apply sends it), else right away.
+    const n = notes.find((x) => x.id === body.id && x.status === "failed");
+    if (n) {
+      Object.assign(n, { status: settings.collect ? "draft" : "queued", error: undefined, sessionId: undefined, usage: undefined });
+      notesChanged();
+      if (!settings.collect) void maybeSend();
+    }
+    return send(res, 200, { ok: !!n });
+  }
   if (p === "/api/edit-note") {
     // A draft's words can still change before it goes.
     const n = notes.find((x) => x.id === body.id && x.status === "draft");

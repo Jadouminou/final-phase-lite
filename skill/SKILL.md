@@ -13,6 +13,14 @@ Start it for the folder you're working in, in the background (it keeps running w
 node "{{DIR}}/server.mjs" "<the folder you're working in>"
 ```
 
+If your shell tool can't run a command in the background (it would wait for a command that never ends), start it
+detached instead:
+
+```bash
+nohup node "{{DIR}}/server.mjs" "<the folder you're working in>" > "${TMPDIR:-/tmp}/final-phase-lite.log" 2>&1 &
+sleep 2; cat "${TMPDIR:-/tmp}/final-phase-lite.log"
+```
+
 It prints its address (http://127.0.0.1:4848 or the next free port) and opens it in the browser. If it's already open
 for that folder, it just shows that window again. Tell the user the address in case the browser didn't open.
 

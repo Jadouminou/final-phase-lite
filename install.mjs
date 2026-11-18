@@ -90,7 +90,7 @@ for (const c of checks) {
   console.log(`${mark} ${c.name}${c.found ? ` (${c.found})` : ""}: ${c.why}`);
   if (!c.ok) console.log(`    To add it: ${c.fix}`);
 }
-console.log(`${skillOk ? "OK " : "NO "} Skill: ${skillOk ? `added to Claude Code (${SKILL_DIR})` : "not added (Node is too old)"}`);
+console.log(`${skillOk ? "OK " : "NO "} Skill: ${skillOk ? `added to Claude Code (${SKILL_DIR}), which OpenCode reads too` : "not added (Node is too old)"}`);
 
 const blocking = checks.filter((c) => !c.ok && !c.optional);
 console.log(

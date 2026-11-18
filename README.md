@@ -112,7 +112,10 @@ open the browser).
 - **OpenCode's steps live** need Node 22.5 or newer. On older Node they appear once each answer is done.
 - **Ollama:** the window looks for it at `http://127.0.0.1:11434` (or `OLLAMA_HOST`). If you've already set Ollama up
   in OpenCode yourself, your own setup is used as it is.
-- Tested on a Mac with Claude Code 2.1 and OpenCode 1.19. It's written to work on Windows and Linux too, but that
+- **OpenCode 2** works too: models come from its API (`opencode api GET /api/model`), steps from its new session
+  tables, notes run in its background service, Stop interrupts the session there as well, and the frame pictures are
+  attached to the message when the model can see pictures.
+- Tested on a Mac with Claude Code 2.1, OpenCode 1.19 and OpenCode 2.1. It's written to work on Windows and Linux too, but that
   hasn't been tried yet.
 
 ## What Final Phase adds
