@@ -477,15 +477,32 @@ function insideCircle(box) {
         hits.set(el, (hits.get(el) ?? 0) + 1);
       }
     }
+  // Motion wrappers (a layer inside a parallax box inside a jitter box…) cover the same pixels: report them once, by
+  // the outermost of the stack, so the list names different things instead of one thing six times.
+  const near = (a, b) => Math.abs(a.left - b.left) < 3 && Math.abs(a.top - b.top) < 3 && Math.abs(a.right - b.right) < 3 && Math.abs(a.bottom - b.bottom) < 3;
+  const stackTop = (el) => {
+    let top = el;
+    for (let p = el.parentElement; p && p !== doc.body && !p.hasAttribute("data-composition-id"); p = p.parentElement) {
+      if (!near(p.getBoundingClientRect(), top.getBoundingClientRect())) break;
+      top = p;
+    }
+    return top;
+  };
+  const grouped = new Map();
+  for (const [el, n] of hits) {
+    const top = stackTop(el);
+    grouped.set(top, Math.max(grouped.get(top) ?? 0, n));
+  }
   const describe = (el) => {
     const id = el.id ? `#${el.id}` : "";
     const cls = typeof el.className === "string" && el.className.trim() ? "." + el.className.trim().split(/\s+/).slice(0, 2).join(".") : "";
     const text = String(el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
-    const src = el.getAttribute?.("src") ? ` src=${el.getAttribute("src").split("/").pop()}` : "";
+    const media = el.getAttribute?.("src") ? el : el.querySelector?.("img[src], video[src]");
+    const src = media ? ` src=${media.getAttribute("src").split("/").pop()}` : "";
     const comp = el.closest("[data-composition-id]")?.getAttribute("data-composition-id");
     return `<${el.tagName.toLowerCase()}${id}${cls}>${src}${text ? ` "${text}"` : ""}${comp && comp !== "main" ? ` (in ${comp})` : ""}`.slice(0, 160);
   };
-  return [...new Set([...hits.entries()].sort((a, b) => b[1] - a[1] || area(a[0]) - area(b[0])).slice(0, 6).map(([el]) => describe(el)))];
+  return [...new Set([...grouped.entries()].sort((a, b) => b[1] - a[1] || area(a[0]) - area(b[0])).slice(0, 6).map(([el]) => describe(el)))];
 }
 
 // ======================================================================
@@ -587,7 +604,7 @@ function renderPins() {
   const key = sourceKey();
   const pins = S.notes.filter((n) => n.time != null && n.source === key && (key !== "live" || n.entry === S.source.entry) && n.time <= (S.dur || 0) + 0.5);
   $("pins").innerHTML = pins
-    .map((n) => `<div class="pin ${n.status === "done" ? "done" : n.status === "queued" || n.status === "preparing" ? "waiting" : ""}" data-note="${n.id}" style="left:${pct(n.time)}" title="${esc(fmt(n.time))}: ${esc(n.text)}"></div>`)
+    .map((n) => `<div class="pin ${n.status === "done" ? "done" : n.status === "draft" ? "draft" : n.status === "queued" || n.status === "preparing" ? "waiting" : ""}" data-note="${n.id}" style="left:${pct(n.time)}" title="${esc(fmt(n.time))}: ${esc(n.text)}"></div>`)
     .join("");
   $("pins").querySelectorAll(".pin").forEach((p) =>
     p.addEventListener("pointerdown", (e) => {
@@ -786,6 +803,7 @@ function richText(t) {
     .join("");
 }
 const NOTE_STATE = {
+  draft: "Waiting for Apply · not sent yet",
   preparing: "Taking a picture of that frame…",
   queued: "Waiting: goes in as soon as the AI is free",
   sent: "With Claude",
@@ -801,7 +819,7 @@ function renderChat() {
   const items = [];
   for (const n of S.notes) {
     const mine = sid ? n.sessionId === sid || !n.sessionId : !n.sessionId;
-    if (mine || n.status === "queued" || n.status === "preparing") items.push({ ts: n.createdAt, note: n });
+    if (mine || ["queued", "preparing", "draft", "failed"].includes(n.status)) items.push({ ts: n.createdAt, note: n });
   }
   for (const e of S.session.events ?? []) {
     if (e.kind === "text") items.push({ ts: e.ts ?? 0, text: e.text });
@@ -825,10 +843,11 @@ function renderChat() {
       const cost = u
         ? `<span class="cost">· ${fmtTokens(u.tokens)} tokens${u.cost != null ? ` · ${fmtCost(u.cost)}${u.apiPrice ? " at API prices" : ""}` : ""}${u.notes > 1 ? ` for ${u.notes} notes` : ""}</span>`
         : "";
-      const icon = n.status === "done" ? ICON.check : n.status === "failed" ? ICON.x : n.status === "sent" ? `<span class="spin"></span>` : ICON.wait;
-      const cancel = n.status === "queued" || n.status === "failed" ? ` <button class="link" data-cancel="${n.id}">Remove</button>` : "";
+      const icon = n.status === "done" ? ICON.check : n.status === "failed" ? ICON.x : n.status === "sent" ? `<span class="spin"></span>` : n.status === "draft" ? `<span class="num">${draftNumber(n)}</span>` : ICON.wait;
+      const edit = n.status === "draft" ? ` <button class="link" data-edit="${n.id}">Edit</button>` : n.status === "failed" ? ` <button class="link" data-retry="${n.id}">Retry</button>` : "";
+      const cancel = n.status === "queued" || n.status === "failed" || n.status === "draft" ? `${edit} <button class="link" data-cancel="${n.id}">Remove</button>` : "";
       const now = n.status === "queued" && S.waiting && !S.run.active ? ` <button class="link" data-sendnow="1">Send now</button>` : "";
-      return `<div class="msg me ${n.status === "failed" ? "failed" : ""}" data-msg="${n.id}">${where}${pic}<div>${esc(n.text)}</div><div class="state"><span class="ic" style="width:13px;height:13px;display:inline-grid">${icon.replace("<svg", '<svg width="13" height="13"')}</span>${state}${cost}${cancel}${now}</div></div>`;
+      return `<div class="msg me ${n.status === "failed" ? "failed" : ""} ${n.status === "draft" ? "draft" : ""}" data-msg="${n.id}">${where}${pic}<div>${esc(n.text)}</div><div class="state"><span class="ic" style="width:13px;height:13px;display:inline-grid">${icon.replace("<svg", '<svg width="13" height="13"')}</span>${state}${cost}${cancel}${now}</div></div>`;
     })
     .join("");
   box.querySelectorAll("[data-seek]").forEach((el) =>
@@ -851,6 +870,14 @@ function renderChat() {
     }),
   );
   box.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", () => api("/api/cancel", { id: b.dataset.cancel })));
+  box.querySelectorAll("[data-retry]").forEach((b) => b.addEventListener("click", () => api("/api/retry", { id: b.dataset.retry })));
+  box.querySelectorAll("[data-edit]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const n = S.notes.find((x) => x.id === b.dataset.edit);
+      const text = n && prompt("Change this note:", n.text);
+      if (text?.trim()) api("/api/edit-note", { id: n.id, text });
+    }),
+  );
   box.querySelectorAll("[data-sendnow]").forEach((b) => b.addEventListener("click", () => api("/api/send-now", {})));
   if (nearBottom) {
     box.scrollTop = box.scrollHeight;
@@ -875,13 +902,32 @@ function renderComposer() {
   } else chip.innerHTML = "";
   const busy = !!S.run.active;
   $("stopBtn").classList.toggle("show", busy);
-  $("sendBtn").textContent = busy || S.waiting ? "Add note" : "Send";
+  const collect = !!S.settings.collect;
+  $("sendBtn").textContent = collect || busy || S.waiting ? "Add note" : "Send";
   let hint = "";
   if (!S.run.claude) hint = "No AI found on this computer (Claude Code or OpenCode).";
+  else if (collect) hint = busy ? `${aiName()} is working. Keep adding notes; Apply sends them together.` : "Notes wait here, free, until you press Apply. Then they all go in one message.";
   else if (busy) hint = `${aiName()} is working. New notes go in as soon as it's done.`;
   else if (S.waiting) hint = `${aiName()} is busy in your terminal. Notes go in when it finishes.`;
   else if (!S.session.id) hint = `This starts a new ${aiName()} session in this folder.`;
   $("composerHint").textContent = hint;
+  renderApplyBar();
+}
+
+const drafts = () => S.notes.filter((n) => n.status === "draft");
+const draftNumber = (n) => drafts().indexOf(n) + 1;
+function renderApplyBar() {
+  const bar = $("applyBar");
+  const d = drafts();
+  const collect = !!S.settings.collect;
+  bar.classList.toggle("show", collect || d.length > 0);
+  if (!collect && !d.length) return (bar.innerHTML = "");
+  const busy = !!S.run.active;
+  bar.innerHTML = `<span class="count">${d.length ? `<b>${d.length}</b> note${d.length > 1 ? "s" : ""} waiting · nothing sent yet` : "No notes yet. Pause, circle, write."}</span><span class="spacer"></span><button type="button" id="applyBtn" class="btn primary" ${d.length ? "" : "disabled"} title="Send every note to the AI in one message, one turn">${busy ? "Apply when free" : `Apply ${d.length || ""}`.trim()}</button>`;
+  $("applyBtn")?.addEventListener("click", () => {
+    S.chatToBottom = true;
+    void api("/api/apply", {});
+  });
 }
 
 function renderSessionPick() {
@@ -930,17 +976,21 @@ function renderAi() {
     else if (m?.local) why = "Runs on your computer: free and private, but slower. Circle what you mean: it tells the model the exact line to change.";
     else if (m && !m.image) why = "This model can't see pictures: it gets the exact second, not the frame.";
   }
-  row.innerHTML = `<label>AI</label>${agentSel}${modelSel}${why ? `<span class="why">${esc(why)}</span>` : ""}`;
+  const collectBox = `<label class="collect" title="On: notes wait until you press Apply, then go together in one turn (fewer tokens). Off: each note goes right away."><input type="checkbox" id="collectPick" ${st.collect ? "checked" : ""}> Collect notes</label>`;
+  row.innerHTML = `<label>AI</label>${agentSel}${modelSel}${collectBox}${why ? `<span class="why">${esc(why)}</span>` : ""}`;
+  $("collectPick")?.addEventListener("change", (e) => api("/api/settings", { collect: e.target.checked }));
   $("agentPick")?.addEventListener("change", (e) => api("/api/settings", { agent: e.target.value }));
   $("modelPick")?.addEventListener("change", (e) => api("/api/settings", { model: e.target.value }));
 }
 
 // ---- sending ----
-async function sendNote(text, { anyMoment = false } = {}) {
+async function sendNote(text, { anyMoment = false, now = false, withDrafts = false } = {}) {
   text = text.trim();
   if (!text) return;
   if (S.playing) pause();
   const body = { text };
+  if (now) body.now = true;
+  if (withDrafts) body.withDrafts = true;
   const circled = !anyMoment && S.attach && S.marks.length > 0;
   if (!anyMoment && S.attach && S.source && S.dur > 0) {
     body.time = Math.round(S.t * 1000) / 1000;
@@ -978,7 +1028,13 @@ $("input").addEventListener("keydown", (e) => {
 });
 $("input").addEventListener("focus", () => S.playing && pause());
 $("input").addEventListener("input", () => S.marks.length && !S.marksSent && prefetchFrame());
-$("renderBtn").addEventListener("click", () => sendNote("Render the final video now.", { anyMoment: true }));
+const RENDER_TEXT =
+  "Render the final video now, the way this project is normally rendered (if a skill made it, use that skill's render steps, including its audio mix). Tell me the file it wrote.";
+$("renderBtn").addEventListener("click", () => {
+  const n = drafts().length;
+  if (n && !confirm(`Apply your ${n} waiting note${n > 1 ? "s" : ""} and then render, all in one turn?\n\nTip: Apply first and check the preview if you want to look before rendering.`)) return;
+  void sendNote(n ? `${RENDER_TEXT} Make the notes above first.` : RENDER_TEXT, { anyMoment: true, now: true, withDrafts: n > 0 });
+});
 function stopRun() {
   void api("/api/stop", {});
 }
@@ -1086,12 +1142,14 @@ function connect() {
   es.addEventListener("notes", (m) => {
     S.notes = JSON.parse(m.data);
     renderChat();
+    renderApplyBar();
     renderPins();
     renderUsage();
   });
   es.addEventListener("settings", (m) => {
     S.settings = JSON.parse(m.data);
     renderAi();
+    renderComposer();
     renderActivity();
   });
   es.addEventListener("waiting", () => {

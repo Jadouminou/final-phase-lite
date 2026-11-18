@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { summarize } from "./lib/transcript.mjs";
 import {
-  scanProject, compositionInfo, pinnedHyperframes, safeJoin, HIDDEN_WORK, VIDEO_EXT,
+  scanProject, compositionInfo, pinnedHyperframes, projectHints, safeJoin, HIDDEN_WORK, VIDEO_EXT,
 } from "./lib/project.mjs";
 import * as claude from "./lib/agents/claude.mjs";
 import * as oc from "./lib/agents/opencode.mjs";
@@ -61,12 +61,14 @@ setInterval(() => {
 }, 20000).unref();
 
 // ---- the project: compositions and videos ----
-let project = { entries: [], entryInfo: {}, videos: [], hfVersion: null };
+let project = { entries: [], entryInfo: {}, videos: [], hfVersion: null, hints: {} };
 let scanTimer = null;
 async function rescan() {
   const { entries, videos } = await scanProject(ROOT);
   const entryInfo = {};
   for (const e of entries) entryInfo[e] = await compositionInfo(path.join(ROOT, ...e.split("/")));
+  const hints = {};
+  for (const e of entries) hints[e] = await projectHints(ROOT, e).catch(() => null);
   // A video still being written (a render in progress) shows up once it has stopped growing.
   const now = Date.now();
   const settled = videos.filter((v) => now - v.mtime > 2500);
@@ -75,7 +77,7 @@ async function rescan() {
     scanTimer = setTimeout(() => void rescan().then(() => broadcast("project", projectPayload())), 3000);
   }
   const hfVersion = entries[0] ? await pinnedHyperframes(path.join(ROOT, ...path.dirname(entries[0]).split("/").filter((s) => s !== "."))) : null;
-  project = { entries, entryInfo, videos: settled, hfVersion };
+  project = { entries, entryInfo, videos: settled, hfVersion, hints };
   return project;
 }
 const projectPayload = () => ({ entries: project.entries, entryInfo: project.entryInfo, videos: project.videos });
@@ -172,11 +174,15 @@ async function watchSessions() {
 
 // ---- which AI and model new messages use ----
 const SETTINGS_FILE = path.join(ROOT, NOTES_DIR, "settings.json");
-const settings = { agent: BIN.claude ? "claude" : BIN.opencode ? "opencode" : "claude", model: null };
+// `collect`: notes wait in the window until you press Apply, then go to the AI together in one message (one turn,
+// one read of the files, one check), instead of one turn per note. LITE_COLLECT=0 makes sending each note right away
+// the default.
+const settings = { agent: BIN.claude ? "claude" : BIN.opencode ? "opencode" : "claude", model: null, collect: process.env.LITE_COLLECT !== "0" };
 try {
   const saved = JSON.parse(await readFile(SETTINGS_FILE, "utf8"));
   if (BIN[saved.agent]) settings.agent = saved.agent;
   if (typeof saved.model === "string") settings.model = saved.model;
+  if (typeof saved.collect === "boolean") settings.collect = saved.collect;
 } catch {}
 let models = [];
 // Ollama's models, handed to OpenCode for each run when OpenCode isn't set up for Ollama itself.
@@ -214,11 +220,12 @@ async function checkLocalContext(model) {
     broadcast("settings", settingsPayload());
   }
 }
-const saveSettings = () => mkdir(path.dirname(SETTINGS_FILE), { recursive: true }).then(() => writeFile(SETTINGS_FILE, JSON.stringify({ agent: settings.agent, model: settings.model }))).catch(() => {});
+const saveSettings = () => mkdir(path.dirname(SETTINGS_FILE), { recursive: true }).then(() => writeFile(SETTINGS_FILE, JSON.stringify({ agent: settings.agent, model: settings.model, collect: settings.collect }))).catch(() => {});
 
 // ---- sending notes ----
 let notes = await loadNotes(ROOT);
-for (const n of notes) if (n.status === "preparing" || n.status === "queued" || n.status === "sent") n.status = n.status === "sent" ? "unknown" : "queued";
+// After a restart: a note cut off while its picture was taken waits as a draft when collecting (it was never sent).
+for (const n of notes) if (n.status === "preparing" || n.status === "queued" || n.status === "sent") n.status = n.status === "sent" ? "unknown" : n.status === "preparing" && settings.collect ? "draft" : "queued";
 const run = { active: null, last: null, limit: null };
 const runPayload = () => ({
   active: run.active ? { agent: run.active.agent, sessionId: run.active.sessionId, startedAt: run.active.startedAt, noteIds: run.active.noteIds } : null,
@@ -260,7 +267,11 @@ async function maybeSend() {
   const own = new Set(notes.map((n) => n.sessionId).filter(Boolean));
   const fork = !!resumeId && !own.has(resumeId);
   const model = agent === "opencode" ? settings.model || follow.model : null;
-  const prompt = buildMessage(ready);
+  const entry = ready.find((n) => n.entry && project.entries.includes(n.entry))?.entry ?? project.entries[0];
+  const sees = agent === "opencode" && !!models.find((m) => m.id === model)?.image;
+  // Absolute: OpenCode reads a relative path from its own folder, not the project.
+  const files = sees ? ready.map((n) => n.picture && path.join(ROOT, ...n.picture.split("/"))).filter(Boolean) : [];
+  const prompt = buildMessage(ready, { hints: entry ? project.hints[entry] : null, attached: files.length > 0 });
   for (const n of ready) Object.assign(n, { status: "sent", sentAt: Date.now(), error: undefined, agent, model: model ?? undefined });
   const opts = {
     bin,
@@ -272,6 +283,7 @@ async function maybeSend() {
       if (!run.active) return;
       run.active.sessionId = id;
       for (const n of ready) n.sessionId = id;
+      notesChanged();
       if (id !== follow.id) void followSession({ agent, id, model }, false);
       else broadcast("run", runPayload());
     },
@@ -281,7 +293,7 @@ async function maybeSend() {
     },
   };
   const lean = agent === "opencode" && !!models.find((m) => m.id === model)?.local;
-  const r = agent === "opencode" ? oc.run({ ...opts, model, lean, extraEnv: ocEnv, title: ready[0].text.replace(/\s+/g, " ").slice(0, 60) }) : claude.run(opts);
+  const r = agent === "opencode" ? oc.run({ ...opts, model, lean, extraEnv: ocEnv, files, title: ready[0].text.replace(/\s+/g, " ").slice(0, 60) }) : claude.run(opts);
   run.active = { agent, stop: r.stop, sessionId: resumeId, startedAt: Date.now(), noteIds: ready.map((n) => n.id) };
   run.last = null;
   broadcast("run", runPayload());
@@ -333,10 +345,25 @@ async function addNote(body) {
   // a circle drawn on it (or for a video file); otherwise HyperFrames takes it here.
   if (time != null && body.picture) note.picture = await savePicture(ROOT, id, body.picture);
   if (time != null && !note.picture && source === "live" && entry) note.picture = await snapshotFrame(ROOT, entry, time, id, project.hfVersion);
-  note.status = "queued";
+  // Collecting: the note waits as a draft (nothing sent, no tokens) until Apply. `now` sends it straight away, and
+  // with `withDrafts` the waiting drafts go with it in the same message (Render after a round of notes).
+  const now = body.now === true || !settings.collect;
+  if (now && body.withDrafts === true) for (const n of notes) if (n.status === "draft") n.status = "queued";
+  note.status = now ? "queued" : "draft";
   notesChanged();
-  void maybeSend();
+  if (now) void maybeSend();
   return { note };
+}
+
+/** Apply: every draft goes to the AI, together, in one message. */
+function applyDrafts() {
+  const drafts = notes.filter((n) => n.status === "draft");
+  for (const n of drafts) n.status = "queued";
+  if (drafts.length) {
+    notesChanged();
+    void maybeSend();
+  }
+  return drafts.length;
 }
 
 // ---- web server ----
@@ -466,8 +493,29 @@ async function handle(req, res) {
     void maybeSend();
     return send(res, 200, { ok: true });
   }
+  if (p === "/api/apply") return send(res, 200, { applied: applyDrafts() });
+  if (p === "/api/retry") {
+    // A note that didn't go through goes back in: as a draft when collecting (Apply sends it), else right away.
+    const n = notes.find((x) => x.id === body.id && x.status === "failed");
+    if (n) {
+      Object.assign(n, { status: settings.collect ? "draft" : "queued", error: undefined, sessionId: undefined, usage: undefined });
+      notesChanged();
+      if (!settings.collect) void maybeSend();
+    }
+    return send(res, 200, { ok: !!n });
+  }
+  if (p === "/api/edit-note") {
+    // A draft's words can still change before it goes.
+    const n = notes.find((x) => x.id === body.id && x.status === "draft");
+    const text = String(body.text ?? "").trim().slice(0, 4000);
+    if (n && text) {
+      n.text = text;
+      notesChanged();
+    }
+    return send(res, 200, { ok: !!(n && text) });
+  }
   if (p === "/api/cancel") {
-    const n = notes.find((x) => x.id === body.id && (x.status === "queued" || x.status === "failed"));
+    const n = notes.find((x) => x.id === body.id && (x.status === "queued" || x.status === "failed" || x.status === "draft"));
     if (n) {
       notes = notes.filter((x) => x !== n);
       notesChanged();
@@ -488,6 +536,7 @@ async function handle(req, res) {
   if (p === "/api/settings") {
     if (body.agent && BIN[body.agent]) settings.agent = body.agent;
     if (typeof body.model === "string" && models.some((m) => m.id === body.model)) settings.model = body.model;
+    if (typeof body.collect === "boolean") settings.collect = body.collect;
     void saveSettings();
     broadcast("settings", settingsPayload());
     return send(res, 200, { ok: true });

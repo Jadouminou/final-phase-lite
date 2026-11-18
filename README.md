@@ -70,8 +70,14 @@ Open Claude Code in the folder where you make a video and say **open Final Phase
   itself.
 - Or type straight into the window's chat: it starts a session in that folder with the AI and model picked above the
   chat.
-- While Claude works, you can keep adding notes: they go in as soon as it's done.
-- **Render** asks Claude to render the final video. New renders appear in the window by themselves.
+- **Collect notes, apply once (on by default).** Go through the whole video adding notes: each one waits in the chat
+  as a numbered draft with an orange pin on the timeline, and nothing is sent, so it costs nothing. You can edit or
+  remove drafts. **Apply** sends them all in one message: the AI reads each file once, makes every change, and checks
+  once, which uses far fewer tokens than one turn per note. Untick **Collect notes** (or start with
+  `LITE_COLLECT=0`) to send each note right away instead.
+- **Render** asks the AI to render the final video the way the project is normally rendered (its skill's steps, when a
+  skill made it). With drafts waiting, it offers to apply them and render in the same turn. New renders appear in the
+  window by themselves.
 
 Keys: Space plays or pauses, ← and → step one frame, Shift + ← / → jumps a second. Click the video to pause it;
 once paused, drag on it to circle something. Clicking a note in the chat brings back its moment and its circle.
@@ -83,6 +89,12 @@ open the browser).
 
 - **What plays live:** HyperFrames videos (an `index.html` with `data-composition-id`), which is what most Claude Code
   video skills make. Anything else shows its latest render (`.mp4`, `.mov`, `.webm`) instead.
+- **Generated projects:** if a skill builds the HTML from a source (a plan, a script, data), say so with a
+  `<meta name="generator" content="…">` tag (or a "generated" / "do not edit" comment) at the top of the composition.
+  Notes then ask the AI to change that source and rebuild, instead of hand-editing files the next build overwrites.
+  The `authoringSkill` in `hyperframes.json` is passed on too, so the AI follows that skill's rules.
+- **Claude Code from the desktop app:** if `claude` isn't on your PATH, the Claude Code bundled with the Claude
+  desktop app is used (Mac). `LITE_CLAUDE_BIN` picks a specific one.
 - **Your notes** are kept in `.final-phase-lite/` inside your video folder (with their pictures). That folder keeps
   itself out of git.
 - **Sessions from the terminal:** a note sent from the window continues that conversation as a copy, so your terminal
@@ -100,7 +112,10 @@ open the browser).
 - **OpenCode's steps live** need Node 22.5 or newer. On older Node they appear once each answer is done.
 - **Ollama:** the window looks for it at `http://127.0.0.1:11434` (or `OLLAMA_HOST`). If you've already set Ollama up
   in OpenCode yourself, your own setup is used as it is.
-- Tested on a Mac with Claude Code 2.1 and OpenCode 1.19. It's written to work on Windows and Linux too, but that
+- **OpenCode 2** works too: models come from its API (`opencode api GET /api/model`), steps from its new session
+  tables, notes run in its background service, Stop interrupts the session there as well, and the frame pictures are
+  attached to the message when the model can see pictures.
+- Tested on a Mac with Claude Code 2.1, OpenCode 1.19 and OpenCode 2.1. It's written to work on Windows and Linux too, but that
   hasn't been tried yet.
 
 ## What Final Phase adds
